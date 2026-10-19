@@ -34,3 +34,4 @@ class Equipment(TimestampMixin):
 
     def __str__(self):
         return f"{self.equipment_no} - {self.name}"
+
