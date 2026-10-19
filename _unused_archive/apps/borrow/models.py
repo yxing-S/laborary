@@ -43,7 +43,7 @@ class BorrowRecord(TimestampMixin):
     )
 
     class Meta:
-        db_table = "borrow_record"
+        db_table = "borrow_records"
         verbose_name = "借用记录"
         verbose_name_plural = verbose_name
         ordering = ["-id"]

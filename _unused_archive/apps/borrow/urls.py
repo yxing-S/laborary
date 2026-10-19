@@ -1,26 +1,30 @@
-"""借用模块路由（3.1 - 3.6 / 4.1 - 4.3 / 5.1 / 5.2 / 5.4，责任人 B）"""
+"""借用模块路由（对齐《后端API接口文档》六、七、八章）
+
+仅登记现有接口，缺失接口（6.7 逾期校验、8.3 逾期统计）不实现。
+根路径前缀 /api/ 由 lab_equipment/urls.py 统一挂载，此处不处理。
+"""
 from django.urls import path
 
 from apps.borrow import views
 
 urlpatterns = [
-    # 借用申请
-    path("borrow/apply", views.borrow_apply),                              # 3.1
-    path("borrow/my/list", views.borrow_my_list),                          # 3.2
-    path("borrow/cancel/<int:recordId>", views.borrow_cancel),             # 3.3
+    # ---- 借用申请 ----
+    path("borrow-applications", views.borrow_apply),                     # 6.1 POST
+    path("borrow-applications/my", views.borrow_my_list),                # 6.2 GET
+    path("borrow-applications/<int:pk>/cancel", views.borrow_cancel),    # 6.3 PUT
+    path("admin/borrow-applications/pending", views.borrow_pending_list),  # 6.4 GET
+    path("admin/borrow-applications/<int:pk>/approval", views.borrow_audit),  # 6.5 PUT
 
-    # 审批
-    path("admin/borrow/pendingList", views.borrow_pending_list),           # 3.4
-    path("admin/borrow/audit/<int:recordId>", views.borrow_audit),         # 3.5
-    path("admin/borrow/allList", views.borrow_all_list),                   # 3.6
+    # ---- 借用记录 ----
+    path("admin/borrow-records", views.borrow_all_list),                 # 6.6 GET
+    path("admin/borrow-records/export", views.export_borrow_record),     # 8.4 GET
 
-    # 归还
-    path("borrow/returnApply/<int:recordId>", views.borrow_return_apply),  # 4.1
-    path("admin/borrow/waitReturnList", views.borrow_wait_return_list),    # 4.2
-    path("admin/borrow/confirmReturn/<int:recordId>", views.borrow_confirm_return),  # 4.3
+    # ---- 归还 ----
+    path("return-applications", views.borrow_return_apply),              # 7.1 POST
+    path("admin/return-applications/pending", views.borrow_wait_return_list),  # 7.2 GET
+    path("admin/return-applications/<int:pk>/confirm", views.borrow_confirm_return),  # 7.3 PUT
 
-    # 统计与导出
-    path("admin/statistics/equipment", views.equipment_statistics),        # 5.1
-    path("admin/statistics/user", views.user_statistics),                  # 5.2
-    path("admin/export/borrowRecord", views.export_borrow_record),         # 5.4
+    # ---- 统计 ----
+    path("admin/statistics/equipment-usage", views.equipment_statistics),  # 8.1 GET
+    path("admin/statistics/user-borrow", views.user_statistics),         # 8.2 GET
 ]

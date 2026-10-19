@@ -1,66 +1,81 @@
-"""用户模块视图（接口文档 1.1 - 1.12，责任人 A）
+"""用户/认证模块视图（对齐《后端API接口文档》二、三章）
 
 接口清单：
-1.1  POST /api/user/register           用户注册
-1.2  POST /api/user/login              用户登录
-1.3  GET  /api/user/info               获取当前用户信息
-1.4  PUT  /api/user/profile            修改个人资料
-1.5  PUT  /api/user/password           修改个人密码
-1.6  PUT  /api/user/resetPwdBySelf     密码找回（重置密码）
-1.7  GET  /api/admin/user/list         管理员-用户列表
-1.8  POST /api/admin/user/add          管理员-新增用户
-1.9  PUT  /api/admin/user/update/{id}  管理员-编辑用户
-1.10 PUT  /api/admin/user/status/{id}  管理员-禁用/启用账号
-1.11 PUT  /api/admin/user/resetPwd/{id} 管理员-强制重置密码
-1.12 POST /api/admin/user/import       管理员-批量导入用户
+2.1 POST /auth/register                     用户注册
+2.2 POST /auth/login                        用户登录
+2.3 POST /auth/logout                       退出登录
+2.4 POST /auth/reset-password               密码找回
+2.5 PUT  /auth/password                     修改个人密码
+3.1 GET  /users/me                          获取当前用户信息
+3.2 PUT  /users/me                          修改个人资料
+3.3 GET  /admin/users                       用户列表查询
+3.4 POST /admin/users                       新增用户
+3.5 PUT  /admin/users/{id}                  编辑用户
+3.6 PUT  /admin/users/{id}/status           禁用/启用用户
+3.7 PUT  /admin/users/{id}/reset-password   强制重置密码
+3.8 DELETE /admin/users/{id}                删除用户
+3.9 POST /admin/users/import                批量导入用户
+3.10 GET  /admin/users/export               导出用户列表
 """
-import secrets
-
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
+from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.common.exceptions import (
-    BadRequestError,
-    NotFoundError,
-)
+from apps.common.constants import BizErrorCode, OperationModule, UserStatus
+from apps.common.exceptions import BadRequestError, BizException, NotFoundError
+from apps.common.pagination import paginate
 from apps.common.permissions import IsAdmin
 from apps.common.response import Result
-from apps.common.utils import read_excel_sheet
+from apps.common.utils import read_excel_sheet, write_excel_sheet
+from apps.log.decorators import log_operation
 from apps.user.models import User
 from apps.user.serializers import (
+    AdminResetPasswordSerializer,
     AdminUserAddSerializer,
     AdminUserUpdateSerializer,
+    ChangePasswordSerializer,
     LoginOutSerializer,
     LoginSerializer,
-    PasswordUpdateSerializer,
     ProfileUpdateSerializer,
-    ResetPwdBySelfSerializer,
+    RegisterOutSerializer,
+    RegisterSerializer,
+    ResetPasswordSerializer,
     UserOutSerializer,
-    UserRegisterSerializer,
     UserStatusSerializer,
 )
 
 
-def _generate_token(user: User) -> str:
-    """为用户签发 JWT access token"""
+def _issue_token(user: User):
+    """为用户签发 JWT access token，返回 (token, 过期时间戳毫秒)"""
     refresh = RefreshToken.for_user(user)
-    return str(refresh.access_token)
+    access = refresh.access_token
+    return str(access), int(access["exp"] * 1000)
 
 
-# ================= 1.1 用户注册 =================
+def _get_user_or_404(pk) -> User:
+    user = User.objects.filter(pk=pk).first()
+    if user is None:
+        raise NotFoundError("用户不存在")
+    return user
+
+
+# ================= 2.1 用户注册 =================
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def register(request):
-    """1.1 用户注册：userNo 唯一；密码后端加密；角色固定 user"""
-    ser = UserRegisterSerializer(data=request.data)
+    """2.1 用户注册：userNo 唯一；角色固定 user"""
+    ser = RegisterSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
 
     if User.objects.filter(user_no=data["userNo"]).exists():
-        raise BadRequestError("学号/工号已存在，请勿重复注册")
+        raise BizException("学号/工号已存在", code=BizErrorCode.USER_NO_EXISTS)
 
     with transaction.atomic():
         user = User.objects.create_user(
@@ -70,52 +85,115 @@ def register(request):
             contact=data.get("contact", ""),
             department=data.get("department", ""),
         )
-    return Result.to_response(Result.success(UserOutSerializer(user).data))
+    token, expire_at = _issue_token(user)
+    out = RegisterOutSerializer({
+        "id": user.id,
+        "userNo": user.user_no,
+        "name": user.name,
+        "role": user.role,
+        "token": token,
+        "expireAt": expire_at,
+    })
+    return Result.to_response(Result.success(out.data))
 
 
-# ================= 1.2 用户登录 =================
+# ================= 2.2 用户登录 =================
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@log_operation(module=OperationModule.SYSTEM_SETTING, action="用户登录")
 def login(request):
-    """1.2 用户登录：返回 token/role/userId/name/status；禁用账号返回 400"""
+    """2.2 用户登录：返回 token；禁用账号返回 2002"""
     ser = LoginSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
 
     user = User.objects.filter(user_no=data["userNo"]).first()
     if user is None or not user.check_password(data["password"]):
-        raise BadRequestError("学号/工号或密码错误")
+        raise BizException("用户名或密码错误", code=BizErrorCode.WRONG_CREDENTIALS)
 
-    if user.status == "禁用":
-        raise BadRequestError("账号已被禁用，请联系管理员")
+    if user.status == UserStatus.DISABLED:
+        raise BizException("账号已被禁用，请联系管理员", code=BizErrorCode.ACCOUNT_DISABLED)
 
-    token = _generate_token(user)
+    user.last_login = timezone.now()
+    user.save(update_fields=["last_login"])
+
+    token, expire_at = _issue_token(user)
     out = LoginOutSerializer({
-        "token": token,
-        "role": user.role,
-        "userId": user.id,
+        "id": user.id,
+        "userNo": user.user_no,
         "name": user.name,
-        "status": user.status,
+        "role": user.role,
+        "contact": user.contact,
+        "department": user.department,
+        "token": token,
+        "expireAt": expire_at,
     })
     return Result.to_response(Result.success(out.data))
 
 
-# ================= 1.3 获取当前登录用户信息 =================
+# ================= 2.3 退出登录 =================
 
-@api_view(["GET"])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def user_info(request):
-    """1.3 从 token 解析当前登录人"""
-    return Result.to_response(Result.success(UserOutSerializer(request.user).data))
+def logout(request):
+    """2.3 退出登录：无状态 JWT，前端丢弃 token 即可（MVP 简化）"""
+    return Result.to_response(Result.success(message="退出登录成功"))
 
 
-# ================= 1.4 修改个人资料 =================
+# ================= 2.4 密码找回 =================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_password(request):
+    """2.4 密码找回（MVP 简化：校验学号后重置为固定初始密码）"""
+    ser = ResetPasswordSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    user_no = ser.validated_data["userNo"]
+
+    user = User.objects.filter(user_no=user_no).first()
+    if user is None:
+        raise NotFoundError("该学号/工号不存在")
+
+    new_pwd = "123456"
+    user.set_password(new_pwd)
+    user.save()
+    return Result.to_response(Result.success({"newPassword": new_pwd}, "密码已重置"))
+
+
+# ================= 2.5 修改个人密码 =================
 
 @api_view(["PUT"])
 @permission_classes([IsAuthenticated])
-def update_profile(request):
-    """1.4 修改个人资料：userNo、role 不允许修改"""
+def change_password(request):
+    """2.5 修改个人密码：校验旧密码"""
+    ser = ChangePasswordSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    data = ser.validated_data
+
+    user = request.user
+    if not user.check_password(data["oldPassword"]):
+        raise BizException("旧密码错误", code=BizErrorCode.WRONG_CREDENTIALS)
+    user.set_password(data["newPassword"])
+    user.save()
+    return Result.to_response(Result.success(message="密码修改成功"))
+
+
+# ================= 3.1 获取当前用户信息 =================
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_me(request):
+    """3.1 从 token 解析当前登录人"""
+    return Result.to_response(Result.success(UserOutSerializer(request.user).data))
+
+
+# ================= 3.2 修改个人资料 =================
+
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def user_me_update(request):
+    """3.2 修改个人资料：userNo、role 不允许修改"""
     ser = ProfileUpdateSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
@@ -128,87 +206,45 @@ def update_profile(request):
     return Result.to_response(Result.success(UserOutSerializer(user).data))
 
 
-# ================= 1.5 修改个人密码 =================
-
-@api_view(["PUT"])
-@permission_classes([IsAuthenticated])
-def update_password(request):
-    """1.5 修改个人密码：校验旧密码"""
-    ser = PasswordUpdateSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
-    data = ser.validated_data
-
-    user = request.user
-    if not user.check_password(data["oldPassword"]):
-        raise BadRequestError("旧密码错误")
-    user.set_password(data["newPassword"])
-    user.save()
-    return Result.to_response(Result.success(msg="密码修改成功"))
-
-
-# ================= 1.6 密码找回（重置密码）=================
-
-@api_view(["PUT"])
-@permission_classes([AllowAny])
-def reset_pwd_by_self(request):
-    """1.6 毕设简化：仅校验学号，重置为固定初始密码"""
-    ser = ResetPwdBySelfSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
-    user_no = ser.validated_data["userNo"]
-
-    user = User.objects.filter(user_no=user_no).first()
-    if user is None:
-        raise NotFoundError("该学号/工号不存在")
-
-    new_pwd = "123456"
-    user.set_password(new_pwd)
-    user.save()
-    return Result.to_response(Result.success({"newPassword": new_pwd}, "密码已重置为初始密码"))
-
-
-# ================= 1.7 管理员-用户列表 =================
+# ================= 3.3 用户列表查询 =================
 
 @api_view(["GET"])
 @permission_classes([IsAdmin])
 def admin_user_list(request):
-    """1.7 分页 + 按学号/院系筛选；仅 admin"""
-    page = int(request.query_params.get("page", 1))
-    size = int(request.query_params.get("size", 10))
-    user_no = request.query_params.get("userNo", "")
-    department = request.query_params.get("department", "")
-    name = request.query_params.get("name", "")
+    """3.3 分页 + 关键字/角色/状态/院系筛选；仅 admin"""
+    keyword = (request.query_params.get("keyword") or "").strip()
+    role = (request.query_params.get("role") or "").strip()
+    status = (request.query_params.get("status") or "").strip()
+    department = (request.query_params.get("department") or "").strip()
 
     qs = User.objects.all().order_by("-id")
-    if user_no:
-        qs = qs.filter(user_no__icontains=user_no)
-    if name:
-        qs = qs.filter(name__icontains=name)
+    if keyword:
+        qs = qs.filter(
+            Q(user_no__icontains=keyword) | Q(name__icontains=keyword)
+        )
+    if role:
+        qs = qs.filter(role=role)
+    if status:
+        qs = qs.filter(status=status)
     if department:
         qs = qs.filter(department__icontains=department)
 
-    total = qs.count()
-    records = qs[(page - 1) * size: page * size]
-    pages = (total + size - 1) // size if size > 0 else 0
-    return Result.to_response(Result.success({
-        "total": total,
-        "pages": pages,
-        "current": page,
-        "records": UserOutSerializer(records, many=True).data,
-    }))
+    return paginate(request, qs, UserOutSerializer)
 
 
-# ================= 1.8 管理员-新增用户 =================
+# ================= 3.4 新增用户 =================
 
 @api_view(["POST"])
 @permission_classes([IsAdmin])
+@log_operation(module=OperationModule.USER_MANAGEMENT, action="新增用户")
 def admin_user_add(request):
-    """1.8 管理员新增用户：含 role、status"""
+    """3.4 管理员新增用户：含 role"""
     ser = AdminUserAddSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
 
     if User.objects.filter(user_no=data["userNo"]).exists():
-        raise BadRequestError("学号/工号已存在")
+        raise BizException("学号/工号已存在", code=BizErrorCode.USER_NO_EXISTS)
 
     with transaction.atomic():
         user = User.objects.create_user(
@@ -218,75 +254,92 @@ def admin_user_add(request):
             contact=data.get("contact", ""),
             department=data.get("department", ""),
             role=data.get("role", "user"),
-            status=data.get("status", "正常"),
         )
     return Result.to_response(Result.success(UserOutSerializer(user).data))
 
 
-# ================= 1.9 管理员-编辑用户 =================
+# ================= 3.5 编辑用户 =================
 
 @api_view(["PUT"])
 @permission_classes([IsAdmin])
+@log_operation(module=OperationModule.USER_MANAGEMENT, action="编辑用户")
 def admin_user_update(request, pk):
-    """1.9 管理员编辑用户：userNo 不允许修改"""
+    """3.5 管理员编辑用户：userNo 不允许修改"""
     user = _get_user_or_404(pk)
     ser = AdminUserUpdateSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
 
     with transaction.atomic():
-        for field in ("name", "contact", "department", "role", "status"):
+        for field in ("name", "role", "contact", "department", "status"):
             if field in data:
                 setattr(user, field, data[field])
-        if data.get("password"):
-            user.set_password(data["password"])
         user.save()
     return Result.to_response(Result.success(UserOutSerializer(user).data))
 
 
-# ================= 1.10 管理员-禁用/启用账号 =================
+# ================= 3.6 禁用/启用用户 =================
 
 @api_view(["PUT"])
 @permission_classes([IsAdmin])
+@log_operation(module=OperationModule.USER_MANAGEMENT, action="禁用/启用用户")
 def admin_user_status(request, pk):
-    """1.10 禁用后不能登录；历史借用记录保留；禁止新建申请"""
+    """3.6 禁用后不能登录；历史借用记录保留"""
     user = _get_user_or_404(pk)
     ser = UserStatusSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     user.status = ser.validated_data["status"]
-    user.save()
+    user.save(update_fields=["status", "update_time"])
     return Result.to_response(Result.success(UserOutSerializer(user).data))
 
 
-# ================= 1.11 管理员-强制重置密码 =================
+# ================= 3.7 强制重置密码 =================
 
 @api_view(["PUT"])
 @permission_classes([IsAdmin])
-def admin_reset_pwd(request, pk):
-    """1.11 返回新的初始密码（仅返回一次）"""
+@log_operation(module=OperationModule.USER_MANAGEMENT, action="重置用户密码")
+def admin_reset_password(request, pk):
+    """3.7 管理员指定新密码并重置"""
     user = _get_user_or_404(pk)
-    new_pwd = secrets.token_hex(4)  # 8 位随机初始密码
-    user.set_password(new_pwd)
+    ser = AdminResetPasswordSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    user.set_password(ser.validated_data["newPassword"])
     user.save()
-    return Result.to_response(Result.success({"newPassword": new_pwd}))
+    return Result.to_response(Result.success(message="密码重置成功"))
 
 
-# ================= 1.12 管理员-批量导入用户 =================
+# ================= 3.8 删除用户 =================
+
+@api_view(["DELETE"])
+@permission_classes([IsAdmin])
+@log_operation(module=OperationModule.USER_MANAGEMENT, action="删除用户")
+def admin_user_delete(request, pk):
+    """3.8 逻辑删除（MVP 用禁用代替）：置为 disabled，历史记录保留"""
+    user = _get_user_or_404(pk)
+    user.status = UserStatus.DISABLED
+    user.save(update_fields=["status", "update_time"])
+    return Result.to_response(Result.success(message="用户已删除"))
+
+
+# ================= 3.9 批量导入用户 =================
 
 @api_view(["POST"])
 @permission_classes([IsAdmin])
 def admin_user_import(request):
-    """1.12 form-data 上传 Excel；返回成功/失败条数与失败行信息"""
+    """3.9 form-data 上传 Excel；返回成功/失败明细"""
     file = request.FILES.get("file")
     if not file:
-        raise BadRequestError("请上传 Excel 文件")
-    if not file.name.endswith((".xlsx",)):
-        raise BadRequestError("仅支持 .xlsx 格式")
+        raise BizException("请上传 Excel 文件", code=BizErrorCode.EXCEL_FORMAT_ERROR)
+    if not file.name.endswith((".xlsx", ".xls")):
+        raise BizException("仅支持 .xlsx/.xls 格式", code=BizErrorCode.EXCEL_FORMAT_ERROR)
 
-    headers, rows = read_excel_sheet(file.read())
+    try:
+        headers, rows = read_excel_sheet(file.read())
+    except ValueError as exc:
+        raise BizException(str(exc), code=BizErrorCode.EXCEL_FORMAT_ERROR)
 
     success_count = 0
-    fail_rows = []
+    fail_list = []
     for row in rows:
         user_no = str(row.get("学号/工号", "") or row.get("userNo", "") or "").strip()
         name = str(row.get("姓名", "") or row.get("name", "") or "").strip()
@@ -295,16 +348,16 @@ def admin_user_import(request):
         department = str(row.get("院系", "") or row.get("department", "") or "").strip()
 
         if not user_no:
-            fail_rows.append({"row": row.get("__row__"), "reason": "学号/工号不能为空"})
+            fail_list.append({"row": row.get("__row__"), "reason": "学号/工号不能为空"})
             continue
         if not name:
-            fail_rows.append({"row": row.get("__row__"), "userNo": user_no, "reason": "姓名不能为空"})
+            fail_list.append({"row": row.get("__row__"), "userNo": user_no, "reason": "姓名不能为空"})
             continue
         if not password:
-            password = "123456"  # 缺省密码
-
+            password = "123456"
         if User.objects.filter(user_no=user_no).exists():
-            fail_rows.append({"row": row.get("__row__"), "userNo": user_no, "reason": "学号/工号已存在"})
+            fail_list.append({"row": row.get("__row__"), "userNo": user_no, "name": name,
+                              "reason": "学号/工号已存在"})
             continue
 
         try:
@@ -313,20 +366,53 @@ def admin_user_import(request):
                 contact=contact, department=department,
             )
             success_count += 1
-        except Exception as e:
-            fail_rows.append({"row": row.get("__row__"), "userNo": user_no, "reason": str(e)})
+        except Exception as exc:
+            fail_list.append({"row": row.get("__row__"), "userNo": user_no, "name": name,
+                              "reason": str(exc)})
 
     return Result.to_response(Result.success({
+        "total": len(rows),
         "successCount": success_count,
-        "failCount": len(fail_rows),
-        "failRows": fail_rows,
+        "failCount": len(fail_list),
+        "failList": fail_list,
     }))
 
 
-# ================= 辅助函数 =================
+# ================= 3.10 导出用户列表 =================
 
-def _get_user_or_404(pk: int) -> User:
-    user = User.objects.filter(pk=pk).first()
-    if user is None:
-        raise NotFoundError("用户不存在")
-    return user
+@api_view(["GET"])
+@permission_classes([IsAdmin])
+def admin_user_export(request):
+    """3.10 导出用户列表为 Excel"""
+    max_rows = getattr(settings, "EXPORT_MAX_ROWS", 10000)
+    keyword = (request.query_params.get("keyword") or "").strip()
+    role = (request.query_params.get("role") or "").strip()
+    status = (request.query_params.get("status") or "").strip()
+    department = (request.query_params.get("department") or "").strip()
+
+    qs = User.objects.all().order_by("id")
+    if keyword:
+        qs = qs.filter(Q(user_no__icontains=keyword) | Q(name__icontains=keyword))
+    if role:
+        qs = qs.filter(role=role)
+    if status:
+        qs = qs.filter(status=status)
+    if department:
+        qs = qs.filter(department__icontains=department)
+    qs = qs[:max_rows]
+
+    headers = ["ID", "学号/工号", "姓名", "角色", "联系方式", "所属院系", "账号状态", "创建时间"]
+    rows = []
+    for u in qs:
+        rows.append([
+            u.id, u.user_no, u.name, u.role, u.contact, u.department,
+            u.status, u.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+        ])
+
+    content = write_excel_sheet("用户列表", headers, rows)
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="users.xlsx"'
+    return response
