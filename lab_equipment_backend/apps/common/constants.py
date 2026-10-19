@@ -55,20 +55,3 @@ class AuditResult:
 
     PASS = "pass"
     REJECT = "reject"
-
-
-class LogModule:
-    """操作日志模块（6.1，G9 归 B）"""
-
-    USER = "用户管理"
-    EQUIPMENT = "设备管理"
-    BORROW = "借用审批"
-    RETURN = "归还管理"
-    LOGIN = "登录认证"
-
-
-class LogResult:
-    """操作日志结果（G9 归 B）"""
-
-    SUCCESS = "成功"
-    FAIL = "失败"
