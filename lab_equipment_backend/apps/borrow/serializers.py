@@ -1,24 +1,23 @@
-"""借用模块 Serializer（接口 3.1 - 5.4，责任人 B）
+"""借用模块 Serializer（对齐《后端API接口文档》六、七章）
 
-统一沿用现有风格：请求 Serializer 用 camelCase + source 映射，
-响应 Serializer 显式声明字段 + 统一时间格式。
+请求 Serializer 用 camelCase + source 映射，响应 Serializer 显式声明字段。
 """
 from rest_framework import serializers
 
 from apps.borrow.models import BorrowRecord
-from apps.common.constants import AuditResult, ReturnType
+from apps.common.constants import AuditAction, ReturnType
 
 
 # ===================== 请求 Serializer =====================
 
 class BorrowApplySerializer(serializers.Serializer):
-    """3.1 提交借用申请"""
+    """6.1 提交借用申请"""
 
     equipmentId = serializers.IntegerField(min_value=1)
+    borrowPurpose = serializers.CharField(min_length=2, max_length=100)
     planBorrowStart = serializers.DateTimeField(input_formats=["%Y-%m-%d %H:%M:%S"])
     planReturnTime = serializers.DateTimeField(input_formats=["%Y-%m-%d %H:%M:%S"])
-    borrowPurpose = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
-    remark = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    remark = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         from django.utils import timezone
@@ -31,62 +30,101 @@ class BorrowApplySerializer(serializers.Serializer):
         return attrs
 
 
-class BorrowAuditSerializer(serializers.Serializer):
-    """3.5 审批借用申请"""
+class BorrowApprovalSerializer(serializers.Serializer):
+    """6.5 审批借用申请"""
 
-    auditResult = serializers.ChoiceField(choices=[AuditResult.PASS, AuditResult.REJECT])
-    approvalComment = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    action = serializers.ChoiceField(choices=[AuditAction.APPROVE, AuditAction.REJECT])
+    comment = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
-        if attrs["auditResult"] == AuditResult.REJECT and not attrs.get("approvalComment", "").strip():
+        if attrs["action"] == AuditAction.REJECT and not attrs.get("comment", "").strip():
             raise serializers.ValidationError("驳回时必须填写审批意见")
         return attrs
 
 
+class ReturnApplySerializer(serializers.Serializer):
+    """7.1 发起归还申请"""
+
+    borrowRecordId = serializers.IntegerField(min_value=1)
+
+
 class ReturnConfirmSerializer(serializers.Serializer):
-    """4.3 确认归还"""
+    """7.3 确认归还"""
 
     returnType = serializers.ChoiceField(
-        choices=[ReturnType.NORMAL, ReturnType.DAMAGE, ReturnType.LOSE]
+        choices=[ReturnType.NORMAL, ReturnType.DAMAGED, ReturnType.LOST]
     )
     damageDesc = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        if attrs["returnType"] in (ReturnType.DAMAGED, ReturnType.LOST) and not attrs.get("damageDesc", "").strip():
+            raise serializers.ValidationError("损坏/丢失时必须填写说明")
+        return attrs
 
 
 # ===================== 响应 Serializer =====================
 
 class BorrowRecordOutSerializer(serializers.ModelSerializer):
-    """借用记录输出（列表 / 详情通用）"""
+    """借用记录输出（我的申请/待审批/总览通用）"""
 
-    recordId = serializers.IntegerField(source="id")
+    id = serializers.IntegerField(read_only=True)
+    applicationNo = serializers.SerializerMethodField()
+    equipmentId = serializers.IntegerField(source="equipment_id")
+    equipmentName = serializers.CharField(source="equipment.name", default="")
+    equipmentNo = serializers.CharField(source="equipment.equipment_no", default="")
     userId = serializers.IntegerField(source="user_id")
     userName = serializers.CharField(source="user.name", default="")
     userNo = serializers.CharField(source="user.user_no", default="")
-    equipmentId = serializers.IntegerField(source="equipment_id")
-    equipmentNo = serializers.CharField(source="equipment.equipment_no", default="")
-    equipmentName = serializers.CharField(source="equipment.name", default="")
+    borrowPurpose = serializers.CharField(source="borrow_purpose")
     planBorrowStart = serializers.DateTimeField(source="plan_borrow_start", format="%Y-%m-%d %H:%M:%S")
     planReturnTime = serializers.DateTimeField(source="plan_return_time", format="%Y-%m-%d %H:%M:%S")
-    borrowPurpose = serializers.CharField(source="borrow_purpose")
-    remark = serializers.CharField()
+    actualReturnTime = serializers.DateTimeField(
+        source="actual_return_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
+    )
     approvalStatus = serializers.CharField(source="approval_status")
-    approvalComment = serializers.CharField(source="approval_comment")
-    auditorName = serializers.CharField(source="auditor.name", default="")
-    auditTime = serializers.DateTimeField(source="audit_time", format="%Y-%m-%d %H:%M:%S")
-    cancelTime = serializers.DateTimeField(source="cancel_time", format="%Y-%m-%d %H:%M:%S")
-    returnApplyTime = serializers.DateTimeField(source="return_apply_time", format="%Y-%m-%d %H:%M:%S")
-    actualReturnTime = serializers.DateTimeField(source="actual_return_time", format="%Y-%m-%d %H:%M:%S")
-    returnType = serializers.CharField(source="return_type")
-    damageDesc = serializers.CharField(source="damage_desc")
+    approvalComment = serializers.CharField(source="approval_comment", default="")
     overdueStatus = serializers.CharField(source="overdue_status")
-    createTime = serializers.DateTimeField(source="create_time", format="%Y-%m-%d %H:%M:%S")
+    applyTime = serializers.DateTimeField(source="create_time", format="%Y-%m-%d %H:%M:%S")
+    remark = serializers.CharField(source="remark", default="")
+
+    def get_applicationNo(self, obj):
+        return f"APP{obj.id:06d}"
 
     class Meta:
         model = BorrowRecord
         fields = [
-            "recordId", "userId", "userName", "userNo",
-            "equipmentId", "equipmentNo", "equipmentName",
-            "planBorrowStart", "planReturnTime", "borrowPurpose", "remark",
-            "approvalStatus", "approvalComment", "auditorName", "auditTime",
-            "cancelTime", "returnApplyTime", "actualReturnTime",
-            "returnType", "damageDesc", "overdueStatus", "createTime",
+            "id", "applicationNo", "equipmentId", "equipmentName", "equipmentNo",
+            "userId", "userName", "userNo", "borrowPurpose",
+            "planBorrowStart", "planReturnTime", "actualReturnTime",
+            "approvalStatus", "approvalComment", "overdueStatus", "applyTime", "remark",
+        ]
+
+
+class ReturnApplicationOutSerializer(serializers.ModelSerializer):
+    """7.2 待归还列表输出（applyTime = 归还申请时间）"""
+
+    id = serializers.IntegerField(read_only=True)
+    borrowRecordId = serializers.IntegerField(source="id")
+    applicationNo = serializers.SerializerMethodField()
+    equipmentId = serializers.IntegerField(source="equipment_id")
+    equipmentName = serializers.CharField(source="equipment.name", default="")
+    equipmentNo = serializers.CharField(source="equipment.equipment_no", default="")
+    userId = serializers.IntegerField(source="user_id")
+    userName = serializers.CharField(source="user.name", default="")
+    userNo = serializers.CharField(source="user.user_no", default="")
+    planReturnTime = serializers.DateTimeField(source="plan_return_time", format="%Y-%m-%d %H:%M:%S")
+    overdueStatus = serializers.CharField(source="overdue_status")
+    applyTime = serializers.DateTimeField(
+        source="return_apply_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
+    )
+
+    def get_applicationNo(self, obj):
+        return f"APP{obj.id:06d}"
+
+    class Meta:
+        model = BorrowRecord
+        fields = [
+            "id", "borrowRecordId", "applicationNo", "equipmentId", "equipmentName",
+            "equipmentNo", "userId", "userName", "userNo",
+            "planReturnTime", "overdueStatus", "applyTime",
         ]

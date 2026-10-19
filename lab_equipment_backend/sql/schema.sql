@@ -10,8 +10,8 @@ USE `lab_equipment`;
 -- ---------------------------------------------------------------------
 -- 1. 用户表（域1：A）
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS `user`;
-CREATE TABLE `user` (
+DROP TABLE IF EXISTS `users`;
+CREATE TABLE `users` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_no`    VARCHAR(50)  NOT NULL COMMENT '学号/工号，唯一',
     `name`       VARCHAR(50)  NOT NULL COMMENT '姓名',
@@ -19,7 +19,7 @@ CREATE TABLE `user` (
     `contact`    VARCHAR(30)  DEFAULT NULL COMMENT '联系方式',
     `department` VARCHAR(100) DEFAULT NULL COMMENT '院系/部门',
     `role`       VARCHAR(20)  NOT NULL DEFAULT 'user' COMMENT '角色：admin/user',
-    `status`     VARCHAR(10)  NOT NULL DEFAULT '正常' COMMENT '账号状态：正常/禁用',
+    `status`     VARCHAR(10)  NOT NULL DEFAULT 'normal' COMMENT '账号状态：normal/disabled',
     `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
@@ -39,8 +39,8 @@ CREATE TABLE `equipment` (
     `buy_date`     DATE          DEFAULT NULL COMMENT '购置日期',
     `price`        DECIMAL(10,2) DEFAULT NULL COMMENT '单价（元）',
     `location`     VARCHAR(200)  DEFAULT NULL COMMENT '存放位置',
-    `status`       VARCHAR(20)   NOT NULL DEFAULT '闲置'
-                   COMMENT '设备状态：闲置/借出中/维修中/已报废',
+    `status`       VARCHAR(20)   NOT NULL DEFAULT 'idle'
+                   COMMENT '设备状态：idle/borrowed/repairing/scrapped',
     `img_url`      VARCHAR(255)  DEFAULT NULL COMMENT '设备图片路径',
     `remark`       VARCHAR(500)  DEFAULT NULL COMMENT '备注',
     `is_deleted`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '逻辑删除：1已删除（历史借用记录保留）',
@@ -55,8 +55,8 @@ CREATE TABLE `equipment` (
 -- ---------------------------------------------------------------------
 -- 3. 借用记录表（域2：B；A 仅在 2.2 设备详情中只读）
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS `borrow_record`;
-CREATE TABLE `borrow_record` (
+DROP TABLE IF EXISTS `borrow_records`;
+CREATE TABLE `borrow_records` (
     `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_id`            BIGINT       NOT NULL COMMENT '申请人用户ID',
     `equipment_id`       BIGINT       NOT NULL COMMENT '设备ID',
@@ -64,18 +64,18 @@ CREATE TABLE `borrow_record` (
     `plan_return_time`   DATETIME     NOT NULL COMMENT '计划归还时间',
     `borrow_purpose`     VARCHAR(255) DEFAULT NULL COMMENT '借用用途',
     `remark`             VARCHAR(500) DEFAULT NULL COMMENT '申请备注',
-    `approval_status`    VARCHAR(20)  NOT NULL DEFAULT '待审批'
-                         COMMENT '审批状态：待审批/已通过/已驳回/已取消/已归还',
+    `approval_status`    VARCHAR(20)  NOT NULL DEFAULT 'pending'
+                         COMMENT '审批状态：pending/approved/rejected/cancelled/returned',
     `approval_comment`   VARCHAR(500) DEFAULT NULL COMMENT '审批意见（驳回必填）',
     `auditor_id`         BIGINT       DEFAULT NULL COMMENT '审批人用户ID',
     `audit_time`         DATETIME     DEFAULT NULL COMMENT '审批时间',
     `cancel_time`        DATETIME     DEFAULT NULL COMMENT '取消时间（3.3）',
     `return_apply_time`  DATETIME     DEFAULT NULL COMMENT '发起归还申请时间（4.1）',
     `actual_return_time` DATETIME     DEFAULT NULL COMMENT '实际归还时间（4.3）',
-    `return_type`        VARCHAR(20)  DEFAULT NULL COMMENT '归还类型：normal/damage/lose',
+    `return_type`        VARCHAR(20)  DEFAULT NULL COMMENT '归还类型：normal/damaged/lost',
     `damage_desc`        VARCHAR(500) DEFAULT NULL COMMENT '损坏/丢失说明',
-    `overdue_status`     VARCHAR(20)  NOT NULL DEFAULT '正常'
-                         COMMENT '逾期状态：正常/已逾期/逾期已归还（G12）',
+    `overdue_status`     VARCHAR(20)  NOT NULL DEFAULT 'normal'
+                         COMMENT '逾期状态：normal/overdue/overdue_returned（G12）',
     `extra_info`         TEXT         DEFAULT NULL COMMENT '预留扩展信息',
     `create_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -115,7 +115,7 @@ CREATE TABLE `operation_log` (
 -- 初始化默认管理员：学号/工号 admin，密码 admin123（BCrypt）
 -- 登录后请尽快通过 1.5 修改密码接口更换
 -- ---------------------------------------------------------------------
-INSERT INTO `user` (`user_no`, `name`, `password`, `contact`, `department`, `role`, `status`)
+INSERT INTO `users` (`user_no`, `name`, `password`, `contact`, `department`, `role`, `status`)
 VALUES (
     'admin',
     '系统管理员',
@@ -123,5 +123,5 @@ VALUES (
     NULL,
     '实验室管理中心',
     'admin',
-    '正常'
+    'normal'
 );
