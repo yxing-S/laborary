@@ -1,0 +1,15 @@
+# 废弃归档（含 .venv 快照，禁止入库）
+_unused_archive/
+
+# Python 缓存 / 虚拟环境
+__pycache__/
+*.pyc
+.venv/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# 本地环境变量
+.env

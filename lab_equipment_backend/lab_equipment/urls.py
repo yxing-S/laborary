@@ -17,4 +17,7 @@ urlpatterns = [
     path("api/", include("apps.user.urls")),
     path("api/", include("apps.equipment.urls")),
     path("api/", include("apps.common.urls")),
+    # B 的模块：借用流转（3.x/4.x/5.x）+ 操作日志（6.1）
+    path("api/", include("apps.borrow.urls")),
+    path("api/", include("apps.log.urls")),
 ]
