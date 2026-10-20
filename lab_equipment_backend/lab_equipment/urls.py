@@ -17,4 +17,6 @@ urlpatterns = [
     path("api/", include("apps.user.urls")),
     path("api/", include("apps.equipment.urls")),
     path("api/", include("apps.common.urls")),
+    path("api/", include("apps.borrow.urls")),
+    path("api/", include("apps.log.urls")),
 ]
