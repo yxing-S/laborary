@@ -35,7 +35,6 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.user",
     "apps.equipment",
-    # B 负责域（模型 G2 冻结，业务逻辑 B 后续实现）
     "apps.borrow",
     "apps.log",
 ]
