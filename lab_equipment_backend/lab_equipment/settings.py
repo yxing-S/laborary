@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     "apps.equipment",
     # A 的 user 模块用 @log_operation 记录操作日志，依赖 B 的 log 切面
     "apps.log",
+    # B 的借用流转域（借用申请/审批/归还/统计导出）
+    "apps.borrow",
 ]
 
 # ---------------- 中间件 ----------------

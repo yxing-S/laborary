@@ -55,3 +55,61 @@ class AuditResult:
 
     PASS = "pass"
     REJECT = "reject"
+
+
+# ======================================================================
+# ↓↓↓ B 模块兼容层（A 侧维护；B 的代码保持原样不改）↓↓↓
+# B 的 borrow/log 代码按另一套常量命名编写，以下补齐其所需名称，
+# 取值与现行中文枚举 / 接口文档对齐。
+# ======================================================================
+
+
+class AuditAction:
+    """审批动作（B 的 borrow 序列化器用），取值同 AuditResult（3.5：pass/reject）"""
+
+    APPROVE = AuditResult.PASS
+    REJECT = AuditResult.REJECT
+
+
+# B 代码使用的旧别名 → 现行枚举
+ApprovalStatus.APPROVED = ApprovalStatus.PASSED      # 已通过
+ApprovalStatus.CANCELLED = ApprovalStatus.CANCELED   # 已取消
+ReturnType.DAMAGED = ReturnType.DAMAGE               # damage
+ReturnType.LOST = ReturnType.LOSE                    # lose
+
+
+class BizErrorCode:
+    """业务错误码（B 的 borrow 模块用）"""
+
+    WRONG_CREDENTIALS = 2001
+    ACCOUNT_DISABLED = 2002
+    USER_NO_EXISTS = 2003
+    EQUIPMENT_NO_EXISTS = 2004
+    EQUIPMENT_NOT_AVAILABLE = 2005
+    HAS_OVERDUE = 2006
+    CANNOT_CANCEL = 2007
+    ALREADY_APPROVED = 2008
+    CANNOT_RETURN = 2009
+    RETURN_ALREADY_SUBMITTED = 2010
+    EQUIPMENT_BORROWED = 2011
+    UPLOAD_FAILED = 2012
+    EXCEL_FORMAT_ERROR = 2013
+    ACCOUNT_LOCKED = 2014
+
+
+class OperationModule:
+    """操作日志模块标识（G9，B 的 @log_operation 用）"""
+
+    USER_MANAGEMENT = "USER_MANAGEMENT"
+    EQUIPMENT_MANAGEMENT = "EQUIPMENT_MANAGEMENT"
+    BORROW_APPLICATION = "BORROW_APPLICATION"
+    BORROW_APPROVAL = "BORROW_APPROVAL"
+    RETURN_CONFIRM = "RETURN_CONFIRM"
+    SYSTEM_SETTING = "SYSTEM_SETTING"
+
+
+class LogResult:
+    """操作日志结果（B 的 log 切面用）"""
+
+    SUCCESS = "成功"
+    FAIL = "失败"
