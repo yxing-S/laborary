@@ -35,8 +35,6 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.user",
     "apps.equipment",
-    "apps.borrow",
-    "apps.log",
 ]
 
 # ---------------- 中间件 ----------------
