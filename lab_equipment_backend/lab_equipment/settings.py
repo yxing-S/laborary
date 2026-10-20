@@ -35,6 +35,8 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.user",
     "apps.equipment",
+    # A 的 user 模块用 @log_operation 记录操作日志，依赖 B 的 log 切面
+    "apps.log",
 ]
 
 # ---------------- 中间件 ----------------
