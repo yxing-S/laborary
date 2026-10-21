@@ -3,7 +3,7 @@
 用法（装饰在 DRF 视图函数上，置于 @permission_classes 之下）：
     @api_view(["POST"])
     @permission_classes([IsAuthenticated])
-    @log_operation(module=LogModule.BORROW, action="提交借用申请")
+    @log_operation(module=OperationModule.BORROW_APPLICATION, action="提交借用申请")
     def borrow_apply(request):
         ...
 
