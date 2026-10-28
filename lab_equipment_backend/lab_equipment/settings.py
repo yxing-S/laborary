@@ -108,6 +108,10 @@ USE_TZ = False  # 接口文档时间格式 yyyy-MM-dd HH:mm:ss，保持 naive
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# ---------------- 媒体文件（4.8 图片上传）----------------
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------- CORS（前后端分离）----------------
