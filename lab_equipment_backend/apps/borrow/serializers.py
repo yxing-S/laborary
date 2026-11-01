@@ -2,11 +2,13 @@
 
 请求 Serializer 用 camelCase + source 映射，响应 Serializer 显式声明字段。
 """
+import math
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.borrow.models import BorrowRecord
 from apps.common.constants import AuditAction, ReturnType
-
 
 # ===================== 请求 Serializer =====================
 
@@ -85,7 +87,7 @@ class BorrowRecordOutSerializer(serializers.ModelSerializer):
     approvalComment = serializers.CharField(source="approval_comment", default="")
     overdueStatus = serializers.CharField(source="overdue_status")
     applyTime = serializers.DateTimeField(source="create_time", format="%Y-%m-%d %H:%M:%S")
-    remark = serializers.CharField(source="remark", default="")
+    remark = serializers.CharField(default="")
 
     def get_applicationNo(self, obj):
         return f"APP{obj.id:06d}"
@@ -127,4 +129,29 @@ class ReturnApplicationOutSerializer(serializers.ModelSerializer):
             "id", "borrowRecordId", "applicationNo", "equipmentId", "equipmentName",
             "equipmentNo", "userId", "userName", "userNo",
             "planReturnTime", "overdueStatus", "applyTime",
+        ]
+
+
+class OverdueRecordOutSerializer(serializers.ModelSerializer):
+    """8.3 逾期记录统计单项"""
+
+    borrowRecordId = serializers.IntegerField(source="id")
+    userName = serializers.CharField(source="user.name", default="")
+    userNo = serializers.CharField(source="user.user_no", default="")
+    equipmentName = serializers.CharField(source="equipment.name", default="")
+    equipmentNo = serializers.CharField(source="equipment.equipment_no", default="")
+    planReturnTime = serializers.DateTimeField(source="plan_return_time", format="%Y-%m-%d %H:%M:%S")
+    overdueDays = serializers.SerializerMethodField()
+    approvalStatus = serializers.CharField(source="approval_status")
+
+    def get_overdueDays(self, obj):
+        """逾期天数：已归还按实际归还时间算，未归还按当前时间算"""
+        end = obj.actual_return_time or timezone.now()
+        return max(1, math.ceil((end - obj.plan_return_time).total_seconds() / 86400))
+
+    class Meta:
+        model = BorrowRecord
+        fields = [
+            "borrowRecordId", "userName", "userNo", "equipmentName", "equipmentNo",
+            "planReturnTime", "overdueDays", "approvalStatus",
         ]

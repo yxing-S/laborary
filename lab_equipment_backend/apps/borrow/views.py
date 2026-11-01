@@ -7,14 +7,17 @@
 6.4 GET  /admin/borrow-applications/pending         待审批列表
 6.5 PUT  /admin/borrow-applications/{id}/approval   审批操作
 6.6 GET  /admin/borrow-records                      借用记录总览
+6.7 GET  /borrow-records/overdue-check              逾期未归还校验
 7.1 POST /return-applications                       发起归还申请
 7.2 GET  /admin/return-applications/pending         待归还列表
 7.3 PUT  /admin/return-applications/{id}/confirm    确认归还
 8.1 GET  /admin/statistics/equipment-usage          设备使用统计
 8.2 GET  /admin/statistics/user-borrow              用户借用统计
+8.3 GET  /admin/statistics/overdue                  逾期记录统计
 8.4 GET  /admin/borrow-records/export               导出借用记录
 """
 from datetime import datetime, time as _time
+import math
 
 from django.conf import settings
 from django.db import transaction
@@ -30,6 +33,7 @@ from apps.borrow.serializers import (
     BorrowApplySerializer,
     BorrowApprovalSerializer,
     BorrowRecordOutSerializer,
+    OverdueRecordOutSerializer,
     ReturnApplicationOutSerializer,
     ReturnApplySerializer,
     ReturnConfirmSerializer,
@@ -267,6 +271,36 @@ def borrow_all_list(request):
     return paginate(request, qs, BorrowRecordOutSerializer)
 
 
+# ===================== 6.7 逾期未归还校验 =====================
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def borrow_overdue_check(request):
+    refresh_overdue_status()
+    qs = BorrowRecord.objects.filter(
+        user=request.user,
+        approval_status=ApprovalStatus.APPROVED,
+        actual_return_time__isnull=True,
+        overdue_status=OverdueStatus.OVERDUE,
+    ).select_related("equipment")
+
+    overdue_list = [
+        {
+            "borrowRecordId": r.id,
+            "equipmentNo": r.equipment.equipment_no,
+            "equipmentName": r.equipment.name,
+            "planReturnTime": r.plan_return_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "overdueDays": max(1, math.ceil((timezone.now() - r.plan_return_time).total_seconds() / 86400)),
+        }
+        for r in qs
+    ]
+    return Result.to_response(Result.success({
+        "hasOverdue": bool(overdue_list),
+        "overdueCount": len(overdue_list),
+        "overdueList": overdue_list,
+    }))
+
+
 # ===================== 7.1 发起归还 =====================
 
 @api_view(["POST"])
@@ -412,7 +446,9 @@ def user_statistics(request):
         qs.values("user_id")
         .annotate(
             totalApplyCount=Count("id"),
-            approvedCount=Count("id", filter=Q(approval_status=ApprovalStatus.APPROVED)),
+            approvedCount=Count(
+                "id", filter=Q(approval_status__in=[ApprovalStatus.APPROVED, ApprovalStatus.RETURNED])
+            ),
             rejectedCount=Count("id", filter=Q(approval_status=ApprovalStatus.REJECTED)),
             returnedCount=Count("id", filter=Q(approval_status=ApprovalStatus.RETURNED)),
             overdueCount=Count(
@@ -441,6 +477,28 @@ def user_statistics(request):
             "overdueCount": r["overdueCount"],
         })
     return Result.to_response(Result.success(result))
+
+
+# ===================== 8.3 逾期记录统计 =====================
+
+@api_view(["GET"])
+@permission_classes([IsAdmin])
+def overdue_statistics(request):
+    refresh_overdue_status()
+
+    start_time = _parse_date_param(request, "startTime")
+    end_time = _parse_date_param(request, "endTime")
+
+    qs = BorrowRecord.objects.filter(
+        overdue_status__in=[OverdueStatus.OVERDUE, OverdueStatus.OVERDUE_RETURNED],
+    ).select_related("user", "equipment")
+    if start_time:
+        qs = qs.filter(create_time__date__gte=start_time)
+    if end_time:
+        qs = qs.filter(create_time__date__lte=end_time)
+    qs = qs.order_by("-id")
+
+    return paginate(request, qs, OverdueRecordOutSerializer)
 
 
 # ===================== 8.4 导出借用记录 =====================
