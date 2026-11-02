@@ -33,8 +33,13 @@ class PageNumberPagination(DRFPageNumberPagination):
         })
 
 
-def paginate(request, queryset, serializer_cls):
-    """对 queryset 分页并返回统一分页 Response（函数式视图共用）"""
+def paginate(request, queryset, serializer_cls, page_size=None):
+    """对 queryset 分页并返回统一分页 Response（函数式视图共用）
+
+    page_size 传值时覆盖该接口的默认每页条数（如 9.1 日志默认 20）。
+    """
     paginator = PageNumberPagination()
+    if page_size is not None:
+        paginator.page_size = page_size
     page = paginator.paginate_queryset(queryset, request)
     return paginator.get_paginated_response(serializer_cls(page, many=True).data)

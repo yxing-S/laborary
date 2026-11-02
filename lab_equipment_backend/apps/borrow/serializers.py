@@ -39,8 +39,9 @@ class BorrowApprovalSerializer(serializers.Serializer):
     comment = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
-        if attrs["action"] == AuditAction.REJECT and not attrs.get("comment", "").strip():
-            raise serializers.ValidationError("驳回时必须填写审批意见")
+        comment = attrs.get("comment", "").strip()
+        if attrs["action"] == AuditAction.REJECT and len(comment) < 2:
+            raise serializers.ValidationError("驳回时必须填写 2-200 字的审批意见")
         return attrs
 
 
@@ -59,8 +60,9 @@ class ReturnConfirmSerializer(serializers.Serializer):
     damageDesc = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
-        if attrs["returnType"] in (ReturnType.DAMAGED, ReturnType.LOST) and not attrs.get("damageDesc", "").strip():
-            raise serializers.ValidationError("损坏/丢失时必须填写说明")
+        desc = attrs.get("damageDesc", "").strip()
+        if attrs["returnType"] in (ReturnType.DAMAGED, ReturnType.LOST) and len(desc) < 2:
+            raise serializers.ValidationError("损坏/丢失时必须填写 2-500 字的说明")
         return attrs
 
 

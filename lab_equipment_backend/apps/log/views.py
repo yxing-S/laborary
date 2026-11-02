@@ -55,4 +55,4 @@ def log_list(request):
         qs = qs.filter(create_time__lte=end_time)
     qs = qs.order_by("-id")
 
-    return paginate(request, qs, OperationLogOutSerializer)
+    return paginate(request, qs, OperationLogOutSerializer, page_size=20)
