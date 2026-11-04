@@ -1,4 +1,4 @@
-
+SET FOREIGN_KEY_CHECKS = 0;
 -- =====================================================================
 
 CREATE DATABASE IF NOT EXISTS `lab_equipment`
@@ -125,3 +125,4 @@ VALUES (
     'admin',
     'normal'
 );
+SET FOREIGN_KEY_CHECKS = 1;

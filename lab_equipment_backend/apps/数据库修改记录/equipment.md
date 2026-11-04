@@ -18,3 +18,19 @@ UPDATE `equipment` SET `status` = 'borrowed'  WHERE `status` = '借出中';
 UPDATE `equipment` SET `status` = 'repairing' WHERE `status` = '维修中';
 UPDATE `equipment` SET `status` = 'scrapped'  WHERE `status` = '已报废';
 ```
+
+## 变更 2
+
+- 类型：表删除（重建）
+- 修改日期：2026-11-02 20:11:29
+- 修改人：767seven
+- 说明：按 `sql/schema.sql` 重建本地 `lab_equipment` 库，删除并重建 `equipment` 表。原 2 条设备数据清空，重建前已备份至 `C:\Users\Chen\Desktop\lab_equipment_backup_20261102_200747.sql`
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `equipment`;
+-- 随后执行 sql/schema.sql 中的 CREATE TABLE `equipment` ...（结构见该文件）
+
+SET FOREIGN_KEY_CHECKS = 1;
+```
