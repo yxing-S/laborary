@@ -65,3 +65,19 @@ ALTER TABLE `borrow_records`
 UPDATE `borrow_records` SET `return_type` = 'damaged' WHERE `return_type` = 'damage';
 UPDATE `borrow_records` SET `return_type` = 'lost'    WHERE `return_type` = 'lose';
 ```
+
+## 变更 5
+
+- 类型：表删除（重建）
+- 修改日期：2026-11-02 20:11:29
+- 修改人：767seven
+- 说明：按 `sql/schema.sql` 重建本地 `lab_equipment` 库，删除并重建 `borrow_records` 表。原 8 条借用记录清空，重建前已备份至 `C:\Users\Chen\Desktop\lab_equipment_backup_20261102_200747.sql`
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `borrow_records`;
+-- 随后执行 sql/schema.sql 中的 CREATE TABLE `borrow_records` ...（结构见该文件）
+
+SET FOREIGN_KEY_CHECKS = 1;
+```
