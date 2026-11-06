@@ -101,7 +101,7 @@ def register(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-@log_operation(module=OperationModule.SYSTEM_SETTING, action="用户登录")
+@log_operation(module=OperationModule.SYSTEM_SETTING, action="login")
 def login(request):
     """2.2 用户登录：返回 token；禁用账号返回 2002"""
     ser = LoginSerializer(data=request.data)
@@ -124,11 +124,14 @@ def login(request):
         "userNo": user.user_no,
         "name": user.name,
         "role": user.role,
+        "status": user.status,
         "contact": user.contact,
         "department": user.department,
         "token": token,
         "expireAt": expire_at,
     })
+    # 让 @log_operation 记录到真实登录人（登录接口本身是 AllowAny，request.user 为匿名）
+    request.user = user
     return Result.to_response(Result.success(out.data))
 
 

@@ -13,13 +13,17 @@ USE `lab_equipment`;
 DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `last_login` DATETIME(6)  DEFAULT NULL COMMENT '最后登录时间（Django AbstractBaseUser）',
+    `is_superuser` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '超级管理员标记（Django PermissionsMixin）',
     `user_no`    VARCHAR(50)  NOT NULL COMMENT '学号/工号，唯一',
     `name`       VARCHAR(50)  NOT NULL COMMENT '姓名',
-    `password`   VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文',
+    `password`   VARCHAR(128) NOT NULL COMMENT 'BCrypt 密文（Django 格式 bcrypt$...）',
     `contact`    VARCHAR(30)  DEFAULT NULL COMMENT '联系方式',
     `department` VARCHAR(100) DEFAULT NULL COMMENT '院系/部门',
     `role`       VARCHAR(20)  NOT NULL DEFAULT 'user' COMMENT '角色：admin/user',
     `status`     VARCHAR(10)  NOT NULL DEFAULT 'normal' COMMENT '账号状态：normal/disabled',
+    `is_active`  TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Django 账号激活标记',
+    `is_staff`   TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Django 后台登录标记',
     `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
@@ -112,17 +116,20 @@ CREATE TABLE `operation_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '系统操作日志表';
 
 -- ---------------------------------------------------------------------
--- 初始化默认管理员：学号/工号 admin，密码 admin123（BCrypt）
+-- 初始化默认管理员：学号/工号 ADMIN001，密码 admin123（与前端登录页演示账号一致）
 -- 登录后请尽快通过 1.5 修改密码接口更换
 -- ---------------------------------------------------------------------
-INSERT INTO `users` (`user_no`, `name`, `password`, `contact`, `department`, `role`, `status`)
+INSERT INTO `users` (`user_no`, `name`, `password`, `contact`, `department`, `role`, `status`, `is_superuser`, `is_active`, `is_staff`)
 VALUES (
-    'admin',
+    'ADMIN001',
     '系统管理员',
-    '$2b$12$fD3xgYvdFmJ2y/ng1J2yXexaM7jbOspYe9L/HJTrGrKNwKIvChqW.',
+    'bcrypt$$2b$12$cYa7NmMwxFxEutTNitBrr.yL.mPUt3nOTVW7Cw71e5sPBU3buWnCO',
     NULL,
     '实验室管理中心',
     'admin',
-    'normal'
+    'normal',
+    1,
+    1,
+    1
 );
 SET FOREIGN_KEY_CHECKS = 1;

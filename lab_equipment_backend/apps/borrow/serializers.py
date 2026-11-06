@@ -51,19 +51,37 @@ class ReturnApplySerializer(serializers.Serializer):
     borrowRecordId = serializers.IntegerField(min_value=1)
 
 
+# 前端页面使用 damage/lose，接口文档定义为 damaged/lost，两者都接受
+_RETURN_TYPE_ALIASES = {"damage": ReturnType.DAMAGED, "lose": ReturnType.LOST}
+
+
 class ReturnConfirmSerializer(serializers.Serializer):
     """7.3 确认归还"""
 
     returnType = serializers.ChoiceField(
-        choices=[ReturnType.NORMAL, ReturnType.DAMAGED, ReturnType.LOST]
+        choices=[
+            ReturnType.NORMAL, ReturnType.DAMAGED, ReturnType.LOST,
+            "damage", "lose",
+        ]
     )
     damageDesc = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+    def validate_returnType(self, value):
+        return _RETURN_TYPE_ALIASES.get(value, value)
 
     def validate(self, attrs):
         desc = attrs.get("damageDesc", "").strip()
         if attrs["returnType"] in (ReturnType.DAMAGED, ReturnType.LOST) and len(desc) < 2:
             raise serializers.ValidationError("损坏/丢失时必须填写 2-500 字的说明")
         return attrs
+
+
+# 这两个接口前端未做状态码转中文适配，直接返回中文展示值
+_OVERDUE_TEXT = {
+    "normal": "正常",
+    "overdue": "已逾期",
+    "overdue_returned": "逾期已归还",
+}
 
 
 # ===================== 响应 Serializer =====================
@@ -85,6 +103,12 @@ class BorrowRecordOutSerializer(serializers.ModelSerializer):
     actualReturnTime = serializers.DateTimeField(
         source="actual_return_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
     )
+    returnApplyTime = serializers.DateTimeField(
+        source="return_apply_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
+    )
+    returnType = serializers.CharField(source="return_type", default="")
+    damageDesc = serializers.CharField(source="damage_desc", default="")
+    department = serializers.CharField(source="user.department", default="")
     approvalStatus = serializers.CharField(source="approval_status")
     approvalComment = serializers.CharField(source="approval_comment", default="")
     overdueStatus = serializers.CharField(source="overdue_status")
@@ -98,8 +122,9 @@ class BorrowRecordOutSerializer(serializers.ModelSerializer):
         model = BorrowRecord
         fields = [
             "id", "applicationNo", "equipmentId", "equipmentName", "equipmentNo",
-            "userId", "userName", "userNo", "borrowPurpose",
-            "planBorrowStart", "planReturnTime", "actualReturnTime",
+            "userId", "userName", "userNo", "department", "borrowPurpose",
+            "planBorrowStart", "planReturnTime", "actualReturnTime", "returnApplyTime",
+            "returnType", "damageDesc",
             "approvalStatus", "approvalComment", "overdueStatus", "applyTime", "remark",
         ]
 
@@ -116,11 +141,18 @@ class ReturnApplicationOutSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="user_id")
     userName = serializers.CharField(source="user.name", default="")
     userNo = serializers.CharField(source="user.user_no", default="")
+    department = serializers.CharField(source="user.department", default="")
+    planBorrowStart = serializers.DateTimeField(
+        source="plan_borrow_start", format="%Y-%m-%d %H:%M:%S"
+    )
     planReturnTime = serializers.DateTimeField(source="plan_return_time", format="%Y-%m-%d %H:%M:%S")
-    overdueStatus = serializers.CharField(source="overdue_status")
+    overdueStatus = serializers.SerializerMethodField()
     applyTime = serializers.DateTimeField(
         source="return_apply_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
     )
+
+    def get_overdueStatus(self, obj):
+        return _OVERDUE_TEXT.get(obj.overdue_status, obj.overdue_status)
 
     def get_applicationNo(self, obj):
         return f"APP{obj.id:06d}"
@@ -129,8 +161,8 @@ class ReturnApplicationOutSerializer(serializers.ModelSerializer):
         model = BorrowRecord
         fields = [
             "id", "borrowRecordId", "applicationNo", "equipmentId", "equipmentName",
-            "equipmentNo", "userId", "userName", "userNo",
-            "planReturnTime", "overdueStatus", "applyTime",
+            "equipmentNo", "userId", "userName", "userNo", "department",
+            "planBorrowStart", "planReturnTime", "overdueStatus", "applyTime",
         ]
 
 
@@ -138,13 +170,27 @@ class OverdueRecordOutSerializer(serializers.ModelSerializer):
     """8.3 逾期记录统计单项"""
 
     borrowRecordId = serializers.IntegerField(source="id")
+    userId = serializers.IntegerField(source="user_id")
     userName = serializers.CharField(source="user.name", default="")
     userNo = serializers.CharField(source="user.user_no", default="")
+    department = serializers.CharField(source="user.department", default="")
     equipmentName = serializers.CharField(source="equipment.name", default="")
     equipmentNo = serializers.CharField(source="equipment.equipment_no", default="")
+    planBorrowStart = serializers.DateTimeField(
+        source="plan_borrow_start", format="%Y-%m-%d %H:%M:%S"
+    )
     planReturnTime = serializers.DateTimeField(source="plan_return_time", format="%Y-%m-%d %H:%M:%S")
+    actualReturnTime = serializers.DateTimeField(
+        source="actual_return_time", format="%Y-%m-%d %H:%M:%S", allow_null=True, required=False
+    )
+    returnType = serializers.CharField(source="return_type", default="")
+    damageDesc = serializers.CharField(source="damage_desc", default="")
+    overdueStatus = serializers.SerializerMethodField()
     overdueDays = serializers.SerializerMethodField()
     approvalStatus = serializers.CharField(source="approval_status")
+
+    def get_overdueStatus(self, obj):
+        return _OVERDUE_TEXT.get(obj.overdue_status, obj.overdue_status)
 
     def get_overdueDays(self, obj):
         """逾期天数：已归还按实际归还时间算，未归还按当前时间算"""
@@ -154,6 +200,8 @@ class OverdueRecordOutSerializer(serializers.ModelSerializer):
     class Meta:
         model = BorrowRecord
         fields = [
-            "borrowRecordId", "userName", "userNo", "equipmentName", "equipmentNo",
-            "planReturnTime", "overdueDays", "approvalStatus",
+            "borrowRecordId", "userId", "userName", "userNo", "department",
+            "equipmentName", "equipmentNo", "planBorrowStart", "planReturnTime",
+            "actualReturnTime", "returnType", "damageDesc", "overdueStatus",
+            "overdueDays", "approvalStatus",
         ]

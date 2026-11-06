@@ -63,14 +63,18 @@ class AuditAction:
 
 
 class OperationModule:
-    """操作日志模块（10.7）"""
+    """操作日志模块（10.7）
 
-    USER_MANAGEMENT = "USER_MANAGEMENT"
-    EQUIPMENT_MANAGEMENT = "EQUIPMENT_MANAGEMENT"
-    BORROW_APPLICATION = "BORROW_APPLICATION"
-    BORROW_APPROVAL = "BORROW_APPROVAL"
-    RETURN_CONFIRM = "RETURN_CONFIRM"
-    SYSTEM_SETTING = "SYSTEM_SETTING"
+    前端操作日志页按 user/equipment/borrow/return 四个英文码筛选，
+    此处保持同一套取值，避免前后端枚举不一致导致筛选为空。
+    """
+
+    USER_MANAGEMENT = "user"
+    EQUIPMENT_MANAGEMENT = "equipment"
+    BORROW_APPLICATION = "borrow"
+    BORROW_APPROVAL = "borrow"
+    RETURN_CONFIRM = "return"
+    SYSTEM_SETTING = "user"
 
 
 class LogResult:

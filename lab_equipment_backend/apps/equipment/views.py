@@ -13,11 +13,14 @@
 5.2 GET    /equipment/{id}           设备详情（公开）
 """
 import uuid
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.conf import settings
 from django.db.models import Q
 from django.http import HttpResponse
+from django.utils.dateparse import parse_date
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -48,6 +51,42 @@ def _get_equipment_or_404(pk) -> Equipment:
 
 def _truthy(value: str) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes")
+
+
+def _parse_excel_date(value):
+    """Excel 购置日期：兼容日期单元格、datetime、yyyy-MM-dd 字符串
+
+    返回 (日期, 错误信息)，无值返回 (None, None)。
+    """
+    if value in (None, ""):
+        return None, None
+    if isinstance(value, datetime):
+        parsed = value.date()
+    elif isinstance(value, date):
+        parsed = value
+    else:
+        try:
+            parsed = parse_date(str(value).strip())
+        except ValueError:
+            parsed = None
+        if parsed is None:
+            return None, "购置日期格式应为 yyyy-MM-dd"
+    if parsed > date.today():
+        return None, "购置日期不能是未来"
+    return parsed, None
+
+
+def _parse_excel_price(value):
+    """Excel 单价：兼容数字、数字字符串，返回 (Decimal, 错误信息)"""
+    if value in (None, ""):
+        return None, None
+    try:
+        price = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None, "单价格式不正确"
+    if price < 0:
+        return None, "单价不能为负数"
+    return price, None
 
 
 def _admin_filtered_qs(request):
@@ -82,7 +121,8 @@ def equipment_browse_list(request):
 
     qs = Equipment.objects.filter(is_deleted=False).order_by("-id")
     if keyword:
-        qs = qs.filter(name__icontains=keyword)
+        # 前端名称/编号搜索共用一个 keyword 参数
+        qs = qs.filter(Q(name__icontains=keyword) | Q(equipment_no__icontains=keyword))
     if status:
         qs = qs.filter(status=status)
     if location:
@@ -227,12 +267,32 @@ def equipment_import(request):
                               "reason": "设备编号已存在"})
             continue
 
+        buy_date_raw = row.get("购置日期")
+        if buy_date_raw in (None, ""):
+            buy_date_raw = row.get("buyDate") or row.get("buy_date")
+        buy_date, date_error = _parse_excel_date(buy_date_raw)
+        if date_error:
+            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
+                              "reason": date_error})
+            continue
+
+        price_raw = row.get("单价")
+        if price_raw in (None, ""):
+            price_raw = row.get("price")
+        price, price_error = _parse_excel_price(price_raw)
+        if price_error:
+            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
+                              "reason": price_error})
+            continue
+
         try:
             Equipment.objects.create(
                 equipment_no=eq_no,
                 name=name,
                 model=str(row.get("型号", "") or row.get("model", "") or "").strip(),
                 spec=str(row.get("规格", "") or row.get("spec", "") or "").strip(),
+                buy_date=buy_date,
+                price=price,
                 location=str(row.get("存放位置", "") or row.get("location", "") or "").strip(),
                 remark=str(row.get("备注", "") or row.get("remark", "") or "").strip(),
                 status=EquipmentStatus.IDLE,
@@ -310,7 +370,8 @@ def upload_image(request):
     except OSError as exc:
         raise BizException(f"文件上传失败：{exc}", code=BizErrorCode.UPLOAD_FAILED)
 
-    url = request.build_absolute_uri(f"{settings.MEDIA_URL}{filename}")
+    # 返回根路径相对地址，前端同源访问（生产环境需 Nginx 配置 /media/ 目录）
+    url = f"{settings.MEDIA_URL}{filename}"
     return Result.to_response(Result.success({
         "url": url,
         "filename": filename,

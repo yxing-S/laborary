@@ -87,14 +87,21 @@ def _parse_datetime_param(request, name):
     return parsed
 
 
-def _parse_date_param(request, name):
+def _parse_range_time_param(request, name, is_end=False):
+    """统计接口时间筛选：兼容 yyyy-MM-dd 与 yyyy-MM-dd HH:mm:ss
+
+    前端日期选择器传的是完整时间，纯日期则按当天起止时间补齐。
+    """
     raw = (request.query_params.get(name) or "").strip()
     if not raw:
         return None
-    parsed = parse_date(raw)
-    if parsed is None:
-        raise BadRequestError(f"参数 {name} 时间格式应为 yyyy-MM-dd")
-    return parsed
+    parsed_dt = parse_datetime(raw)
+    if parsed_dt is not None:
+        return parsed_dt
+    parsed_date = parse_date(raw)
+    if parsed_date is not None:
+        return datetime.combine(parsed_date, _time.max if is_end else _time.min)
+    raise BadRequestError(f"参数 {name} 时间格式应为 yyyy-MM-dd 或 yyyy-MM-dd HH:mm:ss")
 
 
 def _get_borrow_record_or_404(pk, user=None):
@@ -110,18 +117,29 @@ def _get_borrow_record_or_404(pk, user=None):
 def _build_records_qs(request):
     """6.6 / 8.4 共用的借用记录筛选"""
     keyword = (request.query_params.get("keyword") or "").strip()
+    user_id = _parse_int_param(request, "userId")
     equipment_id = _parse_int_param(request, "equipmentId")
     approval_status = (request.query_params.get("approvalStatus") or "").strip()
+    overdue_status = (request.query_params.get("overdueStatus") or "").strip()
     start_time = _parse_datetime_param(request, "startTime")
     end_time = _parse_datetime_param(request, "endTime")
 
     qs = BorrowRecord.objects.all()
     if keyword:
-        qs = qs.filter(Q(user__name__icontains=keyword) | Q(user__user_no__icontains=keyword))
+        qs = qs.filter(
+            Q(user__name__icontains=keyword)
+            | Q(user__user_no__icontains=keyword)
+            | Q(equipment__name__icontains=keyword)
+            | Q(equipment__equipment_no__icontains=keyword)
+        )
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
     if equipment_id is not None:
         qs = qs.filter(equipment_id=equipment_id)
     if approval_status:
         qs = qs.filter(approval_status=approval_status)
+    if overdue_status:
+        qs = qs.filter(overdue_status=overdue_status)
     if start_time:
         qs = qs.filter(create_time__gte=start_time)
     if end_time:
@@ -264,8 +282,9 @@ def borrow_audit(request, pk):
 # ===================== 6.6 借用记录总览 =====================
 
 @api_view(["GET"])
-@permission_classes([IsAdmin])
+@permission_classes([IsAuthenticated])
 def borrow_all_list(request):
+    # 首页概览普通用户也会调用该只读接口，统一放开给已登录用户
     refresh_overdue_status()
     qs = _build_records_qs(request)
     return paginate(request, qs, BorrowRecordOutSerializer)
@@ -377,21 +396,22 @@ def borrow_confirm_return(request, pk):
 # ===================== 8.1 设备使用统计 =====================
 
 @api_view(["GET"])
-@permission_classes([IsAdmin])
+@permission_classes([IsAuthenticated])
 def equipment_statistics(request):
+    # 首页概览所有角色都会调用，只读统计对登录用户开放
     refresh_overdue_status()
     now = timezone.now()
 
-    start_time = _parse_date_param(request, "startTime")
-    end_time = _parse_date_param(request, "endTime")
+    start_time = _parse_range_time_param(request, "startTime")
+    end_time = _parse_range_time_param(request, "endTime", is_end=True)
 
     qs = BorrowRecord.objects.filter(
         approval_status__in=[ApprovalStatus.APPROVED, ApprovalStatus.RETURNED],
     )
     if start_time:
-        qs = qs.filter(create_time__date__gte=start_time)
+        qs = qs.filter(create_time__gte=start_time)
     if end_time:
-        qs = qs.filter(create_time__date__lte=end_time)
+        qs = qs.filter(create_time__lte=end_time)
 
     stats = {}
     for r in qs.values("equipment_id", "plan_borrow_start", "actual_return_time"):
@@ -417,7 +437,22 @@ def equipment_statistics(request):
             "utilizationRate": utilization,
         })
     result.sort(key=lambda x: x["totalBorrowCount"], reverse=True)
-    return Result.to_response(Result.success(result))
+
+    # 前端首页按 data.list 读取，这里统一包装为分页结构
+    total = len(result)
+    try:
+        page = max(1, int(request.query_params.get("page") or 1))
+        page_size = max(1, int(request.query_params.get("pageSize") or total or 1))
+    except (TypeError, ValueError):
+        page, page_size = 1, total or 1
+    start = (page - 1) * page_size
+    return Result.to_response(Result.success({
+        "list": result[start:start + page_size],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": (total + page_size - 1) // page_size if page_size else 0,
+    }))
 
 
 # ===================== 8.2 用户借用统计 =====================
@@ -427,8 +462,8 @@ def equipment_statistics(request):
 def user_statistics(request):
     refresh_overdue_status()
 
-    start_time = _parse_date_param(request, "startTime")
-    end_time = _parse_date_param(request, "endTime")
+    start_time = _parse_range_time_param(request, "startTime")
+    end_time = _parse_range_time_param(request, "endTime", is_end=True)
     department = (request.query_params.get("department") or "").strip()
 
     users_qs = User.objects.filter(role=Role.USER)
@@ -438,9 +473,9 @@ def user_statistics(request):
 
     qs = BorrowRecord.objects.filter(user_id__in=user_ids)
     if start_time:
-        qs = qs.filter(create_time__date__gte=start_time)
+        qs = qs.filter(create_time__gte=start_time)
     if end_time:
-        qs = qs.filter(create_time__date__lte=end_time)
+        qs = qs.filter(create_time__lte=end_time)
 
     rows = (
         qs.values("user_id")
@@ -486,16 +521,16 @@ def user_statistics(request):
 def overdue_statistics(request):
     refresh_overdue_status()
 
-    start_time = _parse_date_param(request, "startTime")
-    end_time = _parse_date_param(request, "endTime")
+    start_time = _parse_range_time_param(request, "startTime")
+    end_time = _parse_range_time_param(request, "endTime", is_end=True)
 
     qs = BorrowRecord.objects.filter(
         overdue_status__in=[OverdueStatus.OVERDUE, OverdueStatus.OVERDUE_RETURNED],
     ).select_related("user", "equipment")
     if start_time:
-        qs = qs.filter(create_time__date__gte=start_time)
+        qs = qs.filter(create_time__gte=start_time)
     if end_time:
-        qs = qs.filter(create_time__date__lte=end_time)
+        qs = qs.filter(create_time__lte=end_time)
     qs = qs.order_by("-id")
 
     return paginate(request, qs, OverdueRecordOutSerializer)

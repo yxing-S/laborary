@@ -74,21 +74,22 @@ ASGI_APPLICATION = "lab_equipment.asgi.application"
 WSGI_APPLICATION = "lab_equipment.wsgi.application"
 
 # ---------------- 数据库（G2：默认 MySQL 8）----------------
-DATABASES = {
-    "default": env.db_url(
-        "DATABASE_URL",
-        default="mysql://root:root@localhost:3306/lab_equipment",
-    )
-    if "DATABASE_URL" in env.ENVIRON
-    else {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": "lab_equipment",
-        "USER": "root",
-        "PASSWORD": "root",
-        "HOST": "localhost",
-        "PORT": "3306",
+# 优先使用 DATABASE_URL；也支持 DB_HOST/DB_USER/DB_PASSWORD 等分项配置，
+# 便于服务器部署时避免密码中的特殊字符被 URL 编码问题影响。
+if "DATABASE_URL" in env.ENVIRON:
+    DATABASES = {"default": env.db_url("DATABASE_URL")}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": env("DB_NAME", default="lab_equipment"),
+            "USER": env("DB_USER", default="root"),
+            "PASSWORD": env("DB_PASSWORD", default="root"),
+            "HOST": env("DB_HOST", default="127.0.0.1"),
+            "PORT": env("DB_PORT", default="3306"),
+            "OPTIONS": {"charset": "utf8mb4"},
+        }
     }
-}
 
 # ---------------- 密码校验（G8 BCrypt）----------------
 PASSWORD_HASHERS = [

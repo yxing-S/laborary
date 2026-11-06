@@ -110,6 +110,7 @@ class LoginOutSerializer(serializers.Serializer):
     userNo = serializers.CharField()
     name = serializers.CharField()
     role = serializers.CharField()
+    status = serializers.CharField()
     contact = serializers.CharField()
     department = serializers.CharField()
     token = serializers.CharField()

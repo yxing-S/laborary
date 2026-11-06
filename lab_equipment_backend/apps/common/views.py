@@ -1,7 +1,7 @@
 """通用字典接口
 
-7.1 GET /api/dict/equipmentStatus  -> ["闲置","借出中","维修中","已报废"]
-7.2 GET /api/dict/borrowStatus    -> ["待审批","已通过","已驳回","已取消","已归还"]
+7.1 GET /api/v1/dict/equipmentStatus  -> ["idle","borrowed","repairing","scrapped"]
+7.2 GET /api/v1/dict/borrowStatus    -> ["pending","approved","rejected","returned","cancelled"]
 """
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated

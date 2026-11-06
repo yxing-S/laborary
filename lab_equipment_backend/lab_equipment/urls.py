@@ -21,12 +21,13 @@ from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/", include("apps.user.urls")),
-    path("api/", include("apps.equipment.urls")),
-    path("api/", include("apps.common.urls")),
+    # 前端 baseURL 为 /real-api/api/v1，Nginx 去掉 /real-api 前缀后即 /api/v1/...
+    path("api/v1/", include("apps.user.urls")),
+    path("api/v1/", include("apps.equipment.urls")),
+    path("api/v1/", include("apps.common.urls")),
     # B 的模块：借用流转（六/七/八章）+ 操作日志（九章）
-    path("api/", include("apps.borrow.urls")),
-    path("api/", include("apps.log.urls")),
+    path("api/v1/", include("apps.borrow.urls")),
+    path("api/v1/", include("apps.log.urls")),
 ]
 
 # 图片上传（4.8）的媒体文件访问；仅 DEBUG 生效，生产环境由 Web 服务器托管

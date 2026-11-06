@@ -3,11 +3,21 @@
 出入参统一 camelCase，通过 source= 映射蛇形列名（数据库结构不变）。
 """
 from datetime import date
+from decimal import Decimal
 
 from rest_framework import serializers
 
 from apps.common.constants import EquipmentStatus
 from apps.equipment.models import Equipment
+
+
+class BlankableDateField(serializers.DateField):
+    """前端清空日期时会提交空字符串，统一按 null 处理"""
+
+    def to_internal_value(self, data):
+        if data is None or (isinstance(data, str) and not data.strip()):
+            return None
+        return super().to_internal_value(data)
 
 
 # ================= 请求 Serializer =================
@@ -19,10 +29,10 @@ class EquipmentAddSerializer(serializers.ModelSerializer):
     name = serializers.CharField(min_length=2, max_length=50)
     model = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     spec = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
-    buyDate = serializers.DateField(source="buy_date", required=False, allow_null=True)
-    price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0,
+    buyDate = BlankableDateField(source="buy_date", required=False, allow_null=True)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"),
                                      required=False, allow_null=True)
-    location = serializers.CharField(min_length=2, max_length=50)
+    location = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     status = serializers.ChoiceField(choices=EquipmentStatus.ALL, default=EquipmentStatus.IDLE)
     imgUrl = serializers.CharField(source="img_url", max_length=255, required=False,
                                    allow_blank=True, default="")
@@ -51,10 +61,10 @@ class EquipmentUpdateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(min_length=2, max_length=50, required=False)
     model = serializers.CharField(max_length=50, required=False, allow_blank=True)
     spec = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    buyDate = serializers.DateField(source="buy_date", required=False, allow_null=True)
-    price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0,
+    buyDate = BlankableDateField(source="buy_date", required=False, allow_null=True)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"),
                                      required=False, allow_null=True)
-    location = serializers.CharField(min_length=2, max_length=50, required=False)
+    location = serializers.CharField(max_length=50, required=False, allow_blank=True)
     status = serializers.ChoiceField(choices=EquipmentStatus.ALL, required=False)
     imgUrl = serializers.CharField(source="img_url", max_length=255, required=False,
                                    allow_blank=True)
@@ -89,6 +99,9 @@ class BorrowHistorySerializer(serializers.Serializer):
         source="actual_return_time", format="%Y-%m-%d %H:%M:%S",
         allow_null=True, required=False,
     )
+    borrowPurpose = serializers.CharField(source="borrow_purpose", default="")
+    returnType = serializers.CharField(source="return_type", default="")
+    damageDesc = serializers.CharField(source="damage_desc", default="")
     approvalStatus = serializers.CharField(source="approval_status")
     overdueStatus = serializers.CharField(source="overdue_status")
 
@@ -132,13 +145,17 @@ class EquipmentBrowseSerializer(serializers.ModelSerializer):
     """5.1 设备列表单项（公开浏览）"""
 
     equipmentNo = serializers.CharField(source="equipment_no")
+    spec = serializers.CharField(default="")
+    buyDate = serializers.DateField(source="buy_date", allow_null=True, required=False)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2,
+                                     allow_null=True, required=False)
     imgUrl = serializers.CharField(source="img_url")
     canBorrow = serializers.SerializerMethodField()
 
     class Meta:
         model = Equipment
-        fields = ["id", "equipmentNo", "name", "model", "location",
-                  "status", "imgUrl", "canBorrow"]
+        fields = ["id", "equipmentNo", "name", "model", "spec", "buyDate",
+                  "price", "location", "status", "imgUrl", "canBorrow"]
 
     def get_canBorrow(self, obj):
         return obj.status == EquipmentStatus.IDLE and not obj.is_deleted

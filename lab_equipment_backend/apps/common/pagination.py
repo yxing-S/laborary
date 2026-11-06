@@ -13,7 +13,8 @@ class PageNumberPagination(DRFPageNumberPagination):
     page_query_param = "page"
     page_size = 10
     page_size_query_param = "pageSize"
-    max_page_size = 100
+    # 前端首页/下拉需要一次拉取全量（pageSize=9999），上限放宽到 10000
+    max_page_size = 10000
 
     def get_paginated_response(self, data):
         total = self.page.paginator.count
