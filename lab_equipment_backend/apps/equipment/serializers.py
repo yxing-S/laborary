@@ -23,9 +23,8 @@ class BlankableDateField(serializers.DateField):
 # ================= 请求 Serializer =================
 
 class EquipmentAddSerializer(serializers.ModelSerializer):
-    """4.1 管理员新增设备"""
+    """4.1 管理员新增设备（equipmentNo 由后端自动生成，前端传了也忽略）"""
 
-    equipmentNo = serializers.CharField(source="equipment_no", min_length=3, max_length=30)
     name = serializers.CharField(min_length=2, max_length=50)
     model = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     spec = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
@@ -40,7 +39,7 @@ class EquipmentAddSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Equipment
-        fields = ["equipmentNo", "name", "model", "spec", "buyDate",
+        fields = ["name", "model", "spec", "buyDate",
                   "price", "location", "status", "imgUrl", "remark"]
 
     def validate_buyDate(self, value):

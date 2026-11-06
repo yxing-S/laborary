@@ -18,6 +18,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
@@ -46,6 +47,21 @@ def _get_equipment_or_404(pk) -> Equipment:
     equipment = Equipment.objects.filter(pk=pk).first()
     if equipment is None:
         raise NotFoundError("设备不存在")
+    return equipment
+
+
+def _create_equipment_with_auto_no(**fields) -> Equipment:
+    """创建设备并自动生成编号：EQ + 自增 id（左侧补零至少 3 位，超过 999 自然增长）
+
+    先以临时占位编号落库拿到自增 id，再回写正式编号；
+    占位编号用 uuid 保证唯一，事务保证不会出现半截数据。
+    """
+    with transaction.atomic():
+        equipment = Equipment.objects.create(
+            equipment_no=f"__tmp__{uuid.uuid4().hex}", **fields
+        )
+        equipment.equipment_no = f"EQ{equipment.id:03d}"
+        equipment.save(update_fields=["equipment_no"])
     return equipment
 
 
@@ -174,14 +190,11 @@ def admin_equipment_detail(request, pk):
 @permission_classes([IsAdmin])
 @log_operation(module=OperationModule.EQUIPMENT_MANAGEMENT, action="新增设备")
 def equipment_add(request):
-    """4.1 equipmentNo 全局唯一，重复返回 2004"""
+    """4.1 编号由后端自动生成（EQ+自增 id）；前端传入的 equipmentNo 一律忽略"""
     ser = EquipmentAddSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
-    if Equipment.objects.filter(equipment_no=ser.validated_data["equipment_no"]).exists():
-        raise BizException("设备编号已存在", code=BizErrorCode.EQUIPMENT_NO_EXISTS)
-
-    equipment = Equipment.objects.create(**ser.validated_data)
+    equipment = _create_equipment_with_auto_no(**ser.validated_data)
     return Result.to_response(Result.success(EquipmentAdminSerializer(equipment).data))
 
 
@@ -237,7 +250,7 @@ def equipment_delete(request, pk):
 @permission_classes([IsAdmin])
 @log_operation(module=OperationModule.EQUIPMENT_MANAGEMENT, action="导入设备")
 def equipment_import(request):
-    """4.6 form-data 上传 Excel；返回成功/失败明细（结构同 3.9）"""
+    """4.6 form-data 上传 Excel；编号列忽略、全部自动生成；返回成功/失败明细（结构同 3.9）"""
     file = request.FILES.get("file")
     if not file:
         raise BizException("请上传 Excel 文件", code=BizErrorCode.EXCEL_FORMAT_ERROR)
@@ -252,19 +265,12 @@ def equipment_import(request):
     success_count = 0
     fail_list = []
     for row in rows:
-        eq_no = str(row.get("设备编号", "") or row.get("equipmentNo", "") or "").strip()
+        # 编号列（设备编号/equipmentNo）一律不读，全部由后端按行顺序自动生成
         name = str(row.get("设备名称", "") or row.get("name", "") or "").strip()
 
-        if not eq_no:
-            fail_list.append({"row": row.get("__row__"), "reason": "设备编号不能为空"})
-            continue
         if not name:
-            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no,
+            fail_list.append({"row": row.get("__row__"),
                               "reason": "设备名称不能为空"})
-            continue
-        if Equipment.objects.filter(equipment_no=eq_no).exists():
-            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
-                              "reason": "设备编号已存在"})
             continue
 
         buy_date_raw = row.get("购置日期")
@@ -272,7 +278,7 @@ def equipment_import(request):
             buy_date_raw = row.get("buyDate") or row.get("buy_date")
         buy_date, date_error = _parse_excel_date(buy_date_raw)
         if date_error:
-            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
+            fail_list.append({"row": row.get("__row__"), "name": name,
                               "reason": date_error})
             continue
 
@@ -281,13 +287,12 @@ def equipment_import(request):
             price_raw = row.get("price")
         price, price_error = _parse_excel_price(price_raw)
         if price_error:
-            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
+            fail_list.append({"row": row.get("__row__"), "name": name,
                               "reason": price_error})
             continue
 
         try:
-            Equipment.objects.create(
-                equipment_no=eq_no,
+            _create_equipment_with_auto_no(
                 name=name,
                 model=str(row.get("型号", "") or row.get("model", "") or "").strip(),
                 spec=str(row.get("规格", "") or row.get("spec", "") or "").strip(),
@@ -299,7 +304,7 @@ def equipment_import(request):
             )
             success_count += 1
         except Exception as exc:
-            fail_list.append({"row": row.get("__row__"), "equipmentNo": eq_no, "name": name,
+            fail_list.append({"row": row.get("__row__"), "name": name,
                               "reason": str(exc)})
 
     return Result.to_response(Result.success({
